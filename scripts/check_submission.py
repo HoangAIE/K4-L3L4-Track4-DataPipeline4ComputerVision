@@ -39,7 +39,7 @@ def sh(*cmd):
         if not Path(bash).exists():
             bash = "bash"
         c = [bash] + c
-    return subprocess.run(c, cwd=ROOT, capture_output=True, text=True, env=dict(os.environ, MSYS_NO_PATHCONV="1"))
+    return subprocess.run(c, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=dict(os.environ, MSYS_NO_PATHCONV="1"))
 
 
 def sha(p: Path) -> str:
