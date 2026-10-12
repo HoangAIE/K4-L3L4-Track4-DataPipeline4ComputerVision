@@ -9,9 +9,15 @@ Mỗi dòng PASS / FAIL / WARN nói rõ cần sửa gì. FAIL là lỗi sẽ b�
 import hashlib
 import json
 import re
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
 N_QUESTIONS = 10
@@ -27,11 +33,17 @@ def check(level, name, detail=""):
 
 
 def sh(*cmd):
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    c = list(cmd)
+    if sys.platform == "win32" and c and str(c[0]).endswith(".sh"):
+        bash = "C:\\Program Files\\Git\\bin\\bash.exe"
+        if not Path(bash).exists():
+            bash = "bash"
+        c = [bash] + c
+    return subprocess.run(c, cwd=ROOT, capture_output=True, text=True, env=dict(os.environ, MSYS_NO_PATHCONV="1"))
 
 
 def sha(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
+    return hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def report_fields(t: str) -> dict:
@@ -47,14 +59,14 @@ def main():
     if "--save-verify" in sys.argv:
         r = sh("scripts/lab.sh", "verify")
         (ROOT / "report").mkdir(exist_ok=True)
-        (ROOT / "report" / "verify.txt").write_text(r.stdout + r.stderr)
+        (ROOT / "report" / "verify.txt").write_text(r.stdout + r.stderr, encoding="utf-8")
         print(r.stdout[-600:] or r.stderr[-600:])
         print("đã lưu report/verify.txt")
         return 0
 
     # 1. file được bảo vệ không bị sửa
     pj = ROOT / "scripts" / "protected.json"
-    prot = json.loads(pj.read_text()) if pj.exists() else {}
+    prot = json.loads(pj.read_text(encoding="utf-8")) if pj.exists() else {}
     changed = [f for f, h in prot.items() if not (ROOT / f).exists() or sha(ROOT / f) != h]
     check("PASS" if prot and not changed else ("WARN" if not prot else "FAIL"), "không sửa tests/, pipeline/verify.py, docker-compose.yml", ", ".join(changed))
 
@@ -64,7 +76,7 @@ def main():
     if not rp.exists():
         check("FAIL", "có REPORT.md")
     else:
-        t = rp.read_text()
+        t = rp.read_text(encoding="utf-8")
         f = report_fields(t)
         header = t.split("## Kết quả cuối")[0]
         check("PASS" if not PLACEHOLDER.search(header) and f["mssv"] else "FAIL", "thông tin cá nhân của REPORT.md đã điền (họ tên, MSSV, GitHub, trip)")
@@ -91,7 +103,7 @@ def main():
         if not p.exists():
             missing.append(name)
             continue
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         if name == "run_summary":
             summary = d
         if f["mssv"] and d.get("student_id") != f["mssv"]:
@@ -110,7 +122,7 @@ def main():
     check("PASS" if not absent and len(have) >= 4 else "FAIL", "ảnh chụp: airflow_graph, minio_lake, metabase_dashboard và ít nhất 1 ảnh bài tập sập",
           ("thiếu: " + ", ".join(absent)) if absent else f"hiện có {len(have)} ảnh")
     v = ROOT / "report" / "verify.txt"
-    ok = v.exists() and "27/27 checks passed" in v.read_text()
+    ok = v.exists() and "27/27 checks passed" in v.read_text(encoding="utf-8")
     check("PASS" if ok else "FAIL", "report/verify.txt cho thấy 27/27 kiểm tra đạt", "chạy: python3 scripts/check_submission.py --save-verify" if not ok else "")
 
     # 5. git và repo công khai
@@ -131,7 +143,7 @@ def main():
         big = [x for x in tracked if (ROOT / x).exists() and (ROOT / x).stat().st_size > 50 * 1024 * 1024]
         check("PASS" if not bad and not big else "FAIL", "không commit dữ liệu data/, file .zip, work/, .tar, .duckdb, hoặc file > 50 MB", ", ".join((bad + big)[:4]))
         leaked = [x for x in tracked if (ROOT / x).is_file() and (ROOT / x).stat().st_size < 2_000_000 and x.endswith(
-            (".py", ".md", ".yml", ".yaml", ".sql", ".sh", ".txt", ".env", ".json")) and SECRETS.search((ROOT / x).read_text(errors="ignore"))]
+            (".py", ".md", ".yml", ".yaml", ".sql", ".sh", ".txt", ".env", ".json")) and SECRETS.search((ROOT / x).read_text(encoding="utf-8", errors="ignore"))]
         check("PASS" if not leaked else "FAIL", "không có khoá bí mật hay token thật trong repo", ", ".join(leaked[:4]))
         remote = sh("git", "remote", "get-url", "origin").stdout.strip()
         check("PASS" if remote else "WARN", "đã có remote origin để push", remote or "chạy: git remote add origin <url repo công khai của bạn>")
